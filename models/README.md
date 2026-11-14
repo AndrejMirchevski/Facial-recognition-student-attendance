@@ -21,6 +21,13 @@ verified by `scripts/download_models.py` (run automatically by `setup.bat`).
   The ONNX files are a third-party conversion, so their correctness was checked against the
   original project's labelled sample images (`images/sample/` in minivision-ai/Silent-Face-Anti-Spoofing):
   real sample P(real) = 1.000; the two fake samples 0.065 and 0.002, i.e. the expected behaviour.
+  Crop details that matter (implemented in `app/vision/liveness_texture.py`): the face box is a
+  square around the MediaPipe mesh (side = longer edge), which matches the box of the original
+  project's RetinaFace detector to within a few percent on test images; the enlarged box is
+  shifted inside the frame rather than clipped; and black letterbox bars must be removed from the
+  frame first - with the bars present, a real face scored P(real) ~0.00, without them ~0.3-0.5
+  (on a very dark frame). The model is also sensitive to darkness/noise and to the face filling
+  the frame, which the pipeline's quality checks guard against.
 - **ArcFace** alignment: 5 points (eye centres, nose tip, mouth corners) taken from the
   MediaPipe landmarks (indices 468, 473, 1, 61, 291) are mapped to the standard ArcFace
   112x112 template with a similarity transform (`cv2.estimateAffinePartial2D`).
