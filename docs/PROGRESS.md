@@ -144,6 +144,9 @@ Tooling changes:
   are per attack type.
 
 ### OPEN points (deferred calibration + later stages)
+0. **Threshold calibration is STILL OPEN** (all thresholds are initial guesses). After stage 4/5 it
+   can be done from the web app: label attempts (attempts.label / attack_type) and run the
+   threshold report on the attempts table.
 1. Next test round by the user: >= 8 genuine (varied light/distance/glasses), >= 10 printed
    photo, >= 10 screen (PC + phone, photo AND video replay), labelled with 1/2/3.
 2. Then `replay_captures.py --suggest`; decide parallax method (flow looked better on this small
@@ -154,7 +157,47 @@ Tooling changes:
 4. Face-height limit 0.70: the user sits at 0.65-0.69 with the Iriun phone camera; revisit after
    spoof data (a closer face gives the texture model less context).
 5. Stage 4 decision still open: guided capture in the browser (MediaPipe JS vs server endpoint).
-## Stage 3 - database + auth + professor account management - TODO
+## Stage 3 - database + auth + professor account management - DONE (2026-11-14)
+
+- **App factory** `app/__init__.py` (`create_app(config_name, overrides)`), blueprints `auth`,
+  `student`, `professor`, `api`; `wsgi.py` + `start_server.bat` (waitress on 127.0.0.1:5000).
+- **Config** (`app/config.py`): Development / Production / Testing classes. SECRET_KEY from env or
+  `instance/secret_key` (auto-created); DATABASE_URL from env (default `instance/attendance.db`,
+  PostgreSQL = only this setting); optional `instance/config.py`; APP_ENV selects the class.
+  Cookies HttpOnly + SameSite=Lax; Secure in ProductionConfig (or SESSION_COOKIE_SECURE=1).
+  TRUST_PROXY_HOPS enables ProxyFix for a reverse proxy later. MAX_CONTENT_LENGTH 12 MB.
+- **Models** (`app/models.py`): users, face_templates (separate; professors only ever see
+  "enrolled yes/no"), attempts (every PipelineResult score: both parallax methods, depth, texture,
+  checks/frames/timings JSON, thresholds in force, + label / attack_type / labelled_by/at / note),
+  attendance (UNIQUE(user_id, date) in the DB; local date+time + UTC timestamp + attempt_id;
+  session_id can be added later as a nullable FK), login_failures. A test fails if the pipeline
+  gains a score the attempts table does not store.
+- **Security** (`app/security.py`): argon2id (argon2-cffi), constant-effort login for unknown
+  users, password policy (>= 8 chars, not all digits/letters, not = username), lockout after 5
+  failures per username or 20 per IP in 15 min (DB table, so it works across waitress threads;
+  correct password is refused while locked), role_required decorator, CSRF on all forms and JSON
+  (X-CSRFToken header, token in `<meta name="csrf-token">`), session_version in the Flask-Login id
+  so password change/reset/disable logs out existing sessions, security headers (strict CSP - no
+  inline JS/CSS allowed in templates -, X-Frame-Options, Permissions-Policy camera=self, no-store).
+- **Pages**: login, change password (forced on first login: every other page redirects there),
+  professor dashboard (create student with given or generated initial password - shown once,
+  never stored in readable form -, reset password, disable/enable, reset enrollment), student
+  home (placeholder check-in + own attendance history), enrollment PLACEHOLDER (unenrolled
+  students are redirected there), error pages.
+- **Scripts**: `scripts/create_professor.py` (interactive), `scripts/init_db.py` (run by setup.bat).
+- **Tests**: test_auth.py, test_roles.py, test_models.py (+ conftest.py) - 85 tests pass in total.
+  Also checked end-to-end against the real waitress server (throwaway DB): CSRF rejection, first
+  login -> password change -> enrollment placeholder, 403 for the wrong role, lockout 429.
+
+### Notes / decisions in stage 3
+- No new dependencies: rate limiting is the DB-based lockout above (no Flask-Limiter).
+- Schema changes: `db.create_all()` only creates missing tables. No migration tool yet
+  (Flask-Migrate/Alembic would be a new dependency - ask the user before adding it). Until then,
+  a schema change means: delete instance/attendance.db (test data only) or alter it by hand.
+- Attendance date = local calendar day in APP_TIMEZONE (default Europe/Skopje), server time.
+- Not built yet (later stages): enrollment + check-in + "delete my face data" (stage 4); attendance
+  by date, attempts log + labelling, CSV, threshold_report.py (stage 5).
+
 ## Stage 4 - enrollment + check-in pages - TODO
 ## Stage 5 - professor dashboard, attempts log, labelling, CSV, threshold report - TODO
 ## Stage 6 - tests, README, SYSTEM_DESCRIPTION, DEPLOYMENT - TODO

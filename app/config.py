@@ -8,11 +8,15 @@ synthetic experiments, not from real attempts on this system. They must be calib
 real attempts (genuine / printed photo / phone screen) using scripts/webcam_test.py and,
 once the web app exists, the attempts log + scripts/threshold_report.py.
 
-Flask settings (secret key, database, cookies) are added in stage 3.
+Flask settings (secret key, database, cookies, login lockout) are the `*Config` classes at the
+bottom. Secrets and deployment settings never live in this file: they come from environment
+variables or from the git-ignored instance/ folder (see `BaseConfig` and app/__init__.py).
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -121,3 +125,82 @@ class VisionConfig:
     require_texture: bool = True
     # Mean P(real) of MiniFASNetV2 + MiniFASNetV1SE, averaged over the frames.
     texture_threshold: float = 0.50
+
+
+# ===================================================================================== Flask
+def _env_bool(name: str, default: bool) -> bool:
+    v = os.environ.get(name)
+    return default if v is None else v.strip().lower() in ("1", "true", "yes", "on")
+
+
+class BaseConfig:
+    """Settings shared by every environment. Override any of them with an environment variable of
+    the same name (where read below) or in instance/config.py (loaded after this class)."""
+    # SECRET_KEY: environment variable SECRET_KEY, else instance/secret_key (created on first run).
+    SECRET_KEY: str | None = os.environ.get("SECRET_KEY")
+    # Database: SQLite file in instance/ by default; set DATABASE_URL to use e.g. PostgreSQL later
+    # (postgresql+psycopg://user:pass@host/dbname) - only this setting changes.
+    SQLALCHEMY_DATABASE_URI: str | None = os.environ.get("DATABASE_URL")
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # Calendar day used for "one check-in per day" (server time is the source of truth).
+    TIMEZONE = os.environ.get("APP_TIMEZONE", "Europe/Skopje")
+
+    # ---- cookies / sessions
+    SESSION_COOKIE_HTTPONLY = True          # JavaScript cannot read the session cookie
+    SESSION_COOKIE_SAMESITE = "Lax"         # not sent on cross-site POSTs
+    SESSION_COOKIE_SECURE = _env_bool("SESSION_COOKIE_SECURE", False)  # True in production (HTTPS)
+    SESSION_COOKIE_NAME = "attendance_session"
+    REMEMBER_COOKIE_HTTPONLY = True
+    REMEMBER_COOKIE_SAMESITE = "Lax"
+    REMEMBER_COOKIE_SECURE = SESSION_COOKIE_SECURE
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
+
+    # ---- CSRF (Flask-WTF): every POST/PUT/PATCH/DELETE needs a token - forms send a hidden field,
+    # JavaScript sends the X-CSRFToken header (token from <meta name="csrf-token">).
+    WTF_CSRF_ENABLED = True
+    WTF_CSRF_TIME_LIMIT = 8 * 3600
+
+    # ---- uploads (check-in frames, stage 4): whole request size limit
+    MAX_CONTENT_LENGTH = 12 * 1024 * 1024
+
+    # ---- login lockout (brute-force protection)
+    LOGIN_MAX_FAILURES = 5            # failed logins for one username within the window -> locked
+    LOGIN_MAX_FAILURES_PER_IP = 20    # failed logins from one IP address within the window -> locked
+    LOGIN_LOCKOUT_MINUTES = 15        # window length and lockout duration
+
+    # ---- passwords
+    PASSWORD_MIN_LENGTH = 8
+    # argon2id cost parameters (argon2-cffi defaults: time 3, memory 64 MiB, parallelism 4)
+    ARGON2_TIME_COST = 3
+    ARGON2_MEMORY_COST = 64 * 1024
+    ARGON2_PARALLELISM = 4
+
+    # Behind a reverse proxy (internet deployment), set to the number of proxies in front of the
+    # app so the client IP (for the login lockout) and https scheme are taken from X-Forwarded-*.
+    TRUST_PROXY_HOPS = int(os.environ.get("TRUST_PROXY_HOPS", "0"))
+
+
+class DevelopmentConfig(BaseConfig):
+    """Local use on http://localhost (browsers allow the camera on localhost without HTTPS)."""
+    DEBUG = False
+
+
+class ProductionConfig(BaseConfig):
+    """Internet deployment behind HTTPS: cookies are only ever sent over HTTPS."""
+    SESSION_COOKIE_SECURE = True
+    REMEMBER_COOKIE_SECURE = True
+    PREFERRED_URL_SCHEME = "https"
+
+
+class TestingConfig(BaseConfig):
+    TESTING = True
+    SECRET_KEY = "test-secret-key"
+    SQLALCHEMY_DATABASE_URI = "sqlite://"   # in-memory
+    WTF_CSRF_ENABLED = False                 # individual tests switch it back on
+    ARGON2_TIME_COST = 1                     # fast hashing in tests only
+    ARGON2_MEMORY_COST = 8 * 1024
+    ARGON2_PARALLELISM = 1
+
+
+CONFIGS = {"development": DevelopmentConfig, "production": ProductionConfig, "testing": TestingConfig}

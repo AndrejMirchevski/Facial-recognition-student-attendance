@@ -1,5 +1,5 @@
 @echo off
-REM One-time setup: virtual environment, packages, model weights.
+REM One-time setup: virtual environment, packages, model weights, database.
 REM Requires Python 3.11 (64-bit) installed from python.org.
 setlocal
 cd /d "%~dp0"
@@ -25,8 +25,12 @@ echo Downloading models ...
 echo Checking models ...
 ".venv\Scripts\python.exe" scripts\check_models.py || exit /b 1
 
-REM TODO (stage 3): create the database here.
+echo Creating the database ...
+".venv\Scripts\python.exe" scripts\init_db.py || exit /b 1
 
 echo.
 echo Setup complete.
+echo Next: create the first professor account with
+echo     .venv\Scripts\python scripts\create_professor.py
+echo then run start_server.bat
 endlocal

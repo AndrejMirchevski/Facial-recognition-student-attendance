@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block content %}
+<h1>Hello, {{ current_user.full_name }}</h1>
+
+<section class="card">
+  <h2>Check in</h2>
+  <p class="muted">Face check-in is added in the next stage of the project.</p>
+  <button class="btn primary" disabled>Check in</button>
+</section>
+
+<section class="card">
+  <h2>My attendance</h2>
+  {% if not history %}
+    <p class="muted">No attendance recorded yet.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Date</th><th>Time</th></tr></thead>
+    <tbody>
+      {% for a in history %}
+      <tr><td>{{ a.date.isoformat() }}</td><td>{{ a.time.strftime('%H:%M') }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endblock %}
