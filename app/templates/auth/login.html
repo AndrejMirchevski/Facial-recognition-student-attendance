@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "_form.html" import field %}
+{% block title %}Log in{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Log in</h1>
+  <p class="muted">Students log in with their student ID. Accounts are created by your professor.</p>
+  <form method="post" novalidate>
+    {{ form.hidden_tag() }}
+    {{ field(form.username, autocomplete="username", autofocus=True) }}
+    {{ field(form.password, autocomplete="current-password") }}
+    {{ form.submit(class="btn primary") }}
+  </form>
+</section>
+{% endblock %}
