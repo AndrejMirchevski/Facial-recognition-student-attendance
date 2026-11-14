@@ -25,7 +25,13 @@ ArcFace ~20-35 ms, Depth Anything at 266x266 ~70-90 ms, MiniFASNet V2 ~2 ms + V1
 3. ArcFace similarity between two of the user's own old photos: 0.604 (plausible same-person value).
 4. Depth Anything: on real faces the nose is clearly closer than the cheeks (signal exists).
 
-## Stage 2 - vision pipeline + webcam test scripts - CODE DONE, waiting for live calibration
+## Stage 2 - vision pipeline + webcam test scripts - DONE (2026-11-14)
+
+Closed by the user before full calibration: test rounds are PAUSED, move on to stage 3.
+Thresholds stay at their initial values (config.py); parallax_method stays "landmarks"; depth
+stays required (option A). Calibration (more labelled genuine / photo / screen attempts, then
+`replay_captures.py --suggest`) is deferred - it can be redone later with webcam_test.py or,
+once stage 5 exists, from the web app's attempts log.
 
 - `app/config.py`: `VisionConfig` with every threshold, commented (initial guesses).
 - `app/vision/`: detector.py (MediaPipe, duplicate-face filter), align.py (ArcFace 5-point,
@@ -137,7 +143,7 @@ Tooling changes:
   attack type (ACCEPTED / rejected by which checks / retry reasons). Distributions and margins
   are per attack type.
 
-### OPEN points (next session)
+### OPEN points (deferred calibration + later stages)
 1. Next test round by the user: >= 8 genuine (varied light/distance/glasses), >= 10 printed
    photo, >= 10 screen (PC + phone, photo AND video replay), labelled with 1/2/3.
 2. Then `replay_captures.py --suggest`; decide parallax method (flow looked better on this small
