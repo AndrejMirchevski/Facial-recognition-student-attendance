@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# downloaded model weights (fetched by scripts/download_models.py)
+models/*
+!models/README.md
+
+# database, secret key, local config
+instance/
+
+# never commit face images / debug captures
+*.jpg
+*.jpeg
+*.png
+!app/static/**/*.png
+!docs/**/*.png
