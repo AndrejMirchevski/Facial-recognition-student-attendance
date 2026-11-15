@@ -161,8 +161,19 @@ class BaseConfig:
     WTF_CSRF_ENABLED = True
     WTF_CSRF_TIME_LIMIT = 8 * 3600
 
-    # ---- uploads (check-in frames, stage 4): whole request size limit
-    MAX_CONTENT_LENGTH = 12 * 1024 * 1024
+    # ---- uploads (enrollment / check-in frames): whole request size limit (5 frames)
+    MAX_CONTENT_LENGTH = 16 * 1024 * 1024
+
+    # ---- capture (browser side; the server re-checks everything)
+    CAPTURE_JPEG_QUALITY = 0.95      # JPEG quality of the 5 uploaded frames (0..1)
+    CAPTURE_MAX_WIDTH = 1920         # frames wider than this are scaled down before upload
+    # at most this many analysed attempts per student within the window (CPU / abuse protection)
+    CAPTURE_MAX_ATTEMPTS = 10
+    CAPTURE_RATE_WINDOW_MINUTES = 5
+
+    # ---- vision models
+    VISION_PRELOAD = True            # load all models at startup (not on the first request)
+    VISION_MAX_PARALLEL = 2          # attempts analysed at the same time
 
     # ---- login lockout (brute-force protection)
     LOGIN_MAX_FAILURES = 5            # failed logins for one username within the window -> locked
@@ -198,6 +209,7 @@ class TestingConfig(BaseConfig):
     SECRET_KEY = "test-secret-key"
     SQLALCHEMY_DATABASE_URI = "sqlite://"   # in-memory
     WTF_CSRF_ENABLED = False                 # individual tests switch it back on
+    VISION_PRELOAD = False                   # tests mock the pipeline
     ARGON2_TIME_COST = 1                     # fast hashing in tests only
     ARGON2_MEMORY_COST = 8 * 1024
     ARGON2_PARALLELISM = 1

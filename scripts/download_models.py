@@ -1,4 +1,5 @@
-"""Download the model weight files into ./models and verify their SHA-256 hashes.
+"""Download the model weight files into ./models (and the MediaPipe browser runtime into
+app/static/vendor/) and verify their SHA-256 hashes.
 
 Usage:  .venv\\Scripts\\python scripts\\download_models.py [--force]
 
@@ -6,6 +7,10 @@ Only uses the Python standard library, so it can run before anything else is set
 Every file is checked against a pinned SHA-256 hash; a file with the wrong hash is
 rejected (and deleted), so a changed or corrupted upstream file is never used silently.
 Sources and licences are documented in models/README.md.
+
+The browser runtime (@mediapipe/tasks-vision, used for the guided capture on the enrollment and
+check-in pages) is served by our own server, never from a CDN; its files are extracted from the
+official npm package and are not committed to git either.
 """
 from __future__ import annotations
 
@@ -13,19 +18,26 @@ import argparse
 import hashlib
 import shutil
 import sys
+import tarfile
 import tempfile
 import urllib.request
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
+ROOT = Path(__file__).resolve().parent.parent
+MODELS_DIR = ROOT / "models"
+TASKS_VISION_VERSION = "1.2.0"
+WEB_VENDOR_DIR = ROOT / "app" / "static" / "vendor" / "mediapipe" / f"tasks-vision-{TASKS_VISION_VERSION}"
+_NPM_TGZ = (f"https://registry.npmjs.org/@mediapipe/tasks-vision/-/"
+            f"tasks-vision-{TASKS_VISION_VERSION}.tgz")
 
 
 @dataclass
 class Source:
     url: str
     zip_member: str | None = None  # if set, the URL is a zip and we extract this one file
+    tar_member: str | None = None  # if set, the URL is a .tgz and we extract this one file
 
 
 @dataclass
@@ -34,6 +46,7 @@ class ModelFile:
     sha256: str
     purpose: str
     sources: list[Source] = field(default_factory=list)  # tried in order
+    dest_dir: Path = MODELS_DIR                            # filename may contain a sub-folder
 
 
 MODEL_FILES: list[ModelFile] = [
@@ -77,6 +90,21 @@ MODEL_FILES: list[ModelFile] = [
 ]
 
 
+# MediaPipe Tasks for JavaScript (Apache-2.0): ES module + WebAssembly (SIMD and non-SIMD builds).
+WEB_FILES: list[ModelFile] = [
+    ModelFile(filename=name, sha256=digest, dest_dir=WEB_VENDOR_DIR,
+              purpose=f"@mediapipe/tasks-vision {TASKS_VISION_VERSION} browser runtime",
+              sources=[Source(_NPM_TGZ, tar_member=f"package/{name}")])
+    for name, digest in [
+        ("vision_bundle.mjs", "870da5cfc43bfcf2a8b0f14e8152dae8c7e701722e1191b0e592b94b81b4127a"),
+        ("wasm/vision_wasm_internal.js", "85c1a342be70427987f900969a5f26e17557351111364e6585e97fb03e93e108"),
+        ("wasm/vision_wasm_internal.wasm", "bcc13df22d3d69ec8cbe8e280989356d844ae00f4523eb82072d2484f44134dc"),
+        ("wasm/vision_wasm_nosimd_internal.js", "e9b2b799e0f1078f5538b300a57835b823742c37e2646308a03f0f25b39fdcdc"),
+        ("wasm/vision_wasm_nosimd_internal.wasm", "ed5e5e5812490bd90d6a440290845ff9e4c516f696847a28a0c0e0573470d469"),
+    ]
+]
+
+
 def sha256_of(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -101,26 +129,41 @@ def _download(url: str, dest: Path) -> None:
         print()
 
 
-def fetch(model: ModelFile, force: bool) -> bool:
-    target = MODELS_DIR / model.filename
+def fetch(model: ModelFile, force: bool, cache: dict[str, Path]) -> bool:
+    target = model.dest_dir / model.filename
     if target.exists() and not force:
         if sha256_of(target) == model.sha256:
             print(f"[ok]   {model.filename} already present")
             return True
         print(f"[warn] {model.filename} exists but hash differs - re-downloading")
+    target.parent.mkdir(parents=True, exist_ok=True)
 
     for src in model.sources:
-        print(f"[get]  {model.filename}  <-  {src.url}")
-        with tempfile.TemporaryDirectory(dir=MODELS_DIR) as tmp:
+        print(f"[get]  {model.filename}  <-  {src.url}" + (" (cached)" if src.url in cache else ""))
+        with tempfile.TemporaryDirectory(dir=target.parent) as tmp:
             tmp_path = Path(tmp) / "download"
             try:
-                _download(src.url, tmp_path)
+                if src.url in cache:          # one archive, several files: download it only once
+                    shutil.copyfile(cache[src.url], tmp_path)
+                else:
+                    _download(src.url, tmp_path)
+                    if src.zip_member or src.tar_member:
+                        cache[src.url] = Path(cache["__dir__"]) / f"{len(cache)}.bin"
+                        shutil.copyfile(tmp_path, cache[src.url])
                 if src.zip_member:
                     with zipfile.ZipFile(tmp_path) as zf, zf.open(src.zip_member) as zsrc, \
                             (Path(tmp) / "member").open("wb") as zdst:
                         shutil.copyfileobj(zsrc, zdst)
                     tmp_path = Path(tmp) / "member"
-            except Exception as exc:  # network error, bad zip, ...
+                elif src.tar_member:
+                    with tarfile.open(tmp_path, "r:gz") as tf:
+                        member = tf.extractfile(src.tar_member)   # read one file; never extract paths
+                        if member is None:
+                            raise FileNotFoundError(src.tar_member)
+                        with (Path(tmp) / "member").open("wb") as out:
+                            shutil.copyfileobj(member, out)
+                    tmp_path = Path(tmp) / "member"
+            except Exception as exc:  # network error, bad archive, ...
                 print(f"[fail] {exc}")
                 continue
             digest = sha256_of(tmp_path)
@@ -139,8 +182,10 @@ def main() -> int:
     parser.add_argument("--force", action="store_true", help="re-download even if files are present")
     args = parser.parse_args()
     MODELS_DIR.mkdir(exist_ok=True)
-    ok = all([fetch(m, args.force) for m in MODEL_FILES])
-    print("All models ready." if ok else "Some models are missing - see errors above.")
+    with tempfile.TemporaryDirectory() as cache_dir:
+        cache: dict[str, Path] = {"__dir__": Path(cache_dir)}
+        ok = all([fetch(m, args.force, cache) for m in MODEL_FILES + WEB_FILES])
+    print("All models and browser files ready." if ok else "Some files are missing - see errors above.")
     return 0 if ok else 1
 
 

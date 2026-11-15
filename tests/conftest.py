@@ -20,10 +20,10 @@ def app():
     app = create_app("testing")
 
     # The tests keep one app context open (to use the database directly), so Flask's `g` would be
-    # shared between requests and Flask-Login would reuse the previous request's user. A real server
-    # has a fresh `g` per request; reproduce that by clearing the cached user first thing.
+    # shared between requests (cached user, CSRF token, CSP flags ...). A real server has a fresh
+    # `g` per request; reproduce that by emptying it first thing in every request.
     def _fresh_user_per_request():
-        g.pop("_login_user", None)
+        g.__dict__.clear()
     app.before_request_funcs.setdefault(None, []).insert(0, _fresh_user_per_request)
 
     with app.app_context():

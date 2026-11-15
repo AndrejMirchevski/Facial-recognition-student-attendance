@@ -1,6 +1,6 @@
 # Model weights
 
-The weight files in this folder are **not committed**. They are downloaded and SHA-256
+The weight files in this folder (and the browser runtime in `app/static/vendor/`) are **not committed**. They are downloaded and SHA-256
 verified by `scripts/download_models.py` (run automatically by `setup.bat`).
 `scripts/check_models.py` proves they load and run.
 
@@ -11,6 +11,7 @@ verified by `scripts/download_models.py` (run automatically by `setup.bat`).
 | `depth_anything_v2_small.onnx` (99 MB) | Monocular relative depth of the face crop (depth liveness). Output is relative *inverse* depth: larger = closer. Input: RGB/255, ImageNet mean/std, side a multiple of 14. | ONNX export of Depth Anything V2 **Small** by onnx-community (Hugging Face): `https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx` | Apache-2.0 (Small only; Base/Large/Giant are CC-BY-NC-4.0) |
 | `MiniFASNetV2.onnx` (1.7 MB) | Texture anti-spoofing, crop scale 2.7 | ONNX export of the Silent-Face-Anti-Spoofing (minivision-ai) weights, from `https://github.com/yakhyo/face-anti-spoofing/releases/download/weights/MiniFASNetV2.onnx` | Apache-2.0 (both upstream and the export repo) |
 | `MiniFASNetV1SE.onnx` (1.7 MB) | Texture anti-spoofing, crop scale 4.0 | same repo: `.../weights/MiniFASNetV1SE.onnx` | Apache-2.0 |
+| `app/static/vendor/mediapipe/tasks-vision-1.2.0/` (vision_bundle.mjs + wasm/, ~28 MB) | MediaPipe Face Landmarker **in the browser** (guided capture on the enrollment / check-in pages), with the same `face_landmarker.task` model | Official npm package `@mediapipe/tasks-vision` 1.2.0: `https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-1.2.0.tgz` (5 files extracted, each SHA-256 pinned). Served by our own server, no CDN. The library tries to send usage logs to Google (`odml.pa.googleapis.com`); our Content-Security-Policy (`connect-src 'self'`) blocks that. | Apache-2.0 |
 
 ## Notes
 
