@@ -1,7 +1,10 @@
-"""Professor pages: student account management (stage 3).
+"""Professor pages.
 
-Attendance by date, the attempts log with labelling, and CSV export come in stage 5.
-Professors NEVER see or download face templates or face images: these views only ever ask
+  this file            student account management (create, reset password, disable, reset enrollment)
+  attendance_views.py  attendance by date + attendance CSV
+  attempts_views.py    attempts log with filters, attempt detail, labelling, attempts CSV
+
+Every route of this blueprint is for professors only (before_request below). Professors NEVER see or download face templates or face images: these views only ever ask
 whether a template exists (User.is_enrolled) and can delete it (reset enrollment).
 """
 from __future__ import annotations
@@ -125,3 +128,7 @@ def reset_enrollment(user_id: int):
     flash(f"Face data of {student.full_name} ({student.username}) deleted - they must enroll again."
           if deleted else f"{student.full_name} was not enrolled.", "info")
     return redirect(url_for("professor.dashboard"))
+
+
+# routes in other files register themselves on `bp` (imported last: they import bp from here)
+from . import attempts_views, attendance_views  # noqa: E402,F401

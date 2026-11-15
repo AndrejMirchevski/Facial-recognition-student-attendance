@@ -11,6 +11,7 @@ Rules (CLAUDE.md):
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import timedelta
 
@@ -31,6 +32,15 @@ class Outcome:
     body: dict = field(default_factory=dict)
 
 
+@dataclass
+class Timing:
+    """Timing of one upload, stored in attempts.timings_ms next to the pipeline's own steps:
+    server_ms = request start (before reading the frames) -> analysis done;
+    client_capture_ms = guided capture in the browser (camera ready -> 5th frame), if reported."""
+    started: float                       # time.perf_counter() at the start of the request
+    client_capture_ms: float | None = None
+
+
 def _refuse(status: int, error: str, message: str) -> Outcome:
     return Outcome(status, {"error": error, "message": message})
 
@@ -49,8 +59,15 @@ def too_many_attempts(user: User) -> bool:
     return n >= c["CAPTURE_MAX_ATTEMPTS"]
 
 
-def _log_attempt(user: User, result) -> Attempt:
-    attempt = Attempt.from_summary(user.id, result.summary(), thresholds=vision_service.thresholds_snapshot())
+def _log_attempt(user: User, result, timing: Timing | None = None) -> Attempt:
+    summary = result.summary()
+    if timing is not None:
+        t = dict(summary.get("timings_ms") or {})
+        t["server_ms"] = round(1000 * (time.perf_counter() - timing.started), 1)
+        if timing.client_capture_ms is not None:
+            t["client_capture_ms"] = timing.client_capture_ms
+        summary["timings_ms"] = t
+    attempt = Attempt.from_summary(user.id, summary, thresholds=vision_service.thresholds_snapshot())
     db.session.add(attempt)
     db.session.flush()           # get attempt.id
     return attempt
@@ -61,7 +78,7 @@ def _result_body(result, attempt: Attempt) -> dict:
             "attempt_id": attempt.id}
 
 
-def enroll(user: User, frames: list[np.ndarray], consent: bool) -> Outcome:
+def enroll(user: User, frames: list[np.ndarray], consent: bool, timing: Timing | None = None) -> Outcome:
     if user.is_enrolled:
         return _refuse(409, "already_enrolled", "You are already enrolled.")
     if not consent:
@@ -70,7 +87,7 @@ def enroll(user: User, frames: list[np.ndarray], consent: bool) -> Outcome:
         return _refuse(429, "too_many_attempts", "Too many attempts. Please wait a few minutes.")
 
     result = vision_service.analyse(frames, template=None)
-    attempt = _log_attempt(user, result)
+    attempt = _log_attempt(user, result, timing)
     body = _result_body(result, attempt)
     if result.passed and result.embedding is not None:
         now = utcnow()
@@ -85,7 +102,7 @@ def enroll(user: User, frames: list[np.ndarray], consent: bool) -> Outcome:
     return Outcome(200, body)
 
 
-def checkin(user: User, frames: list[np.ndarray]) -> Outcome:
+def checkin(user: User, frames: list[np.ndarray], timing: Timing | None = None) -> Outcome:
     tpl_row = db.session.execute(select(FaceTemplate).where(FaceTemplate.user_id == user.id)).scalar_one_or_none()
     if tpl_row is None:
         return _refuse(409, "not_enrolled", "You need to enroll your face before you can check in.")
@@ -95,7 +112,7 @@ def checkin(user: User, frames: list[np.ndarray]) -> Outcome:
     # 1:1 verification against THIS student's template only
     template = vision_service.template_from_bytes(tpl_row.template)
     result = vision_service.analyse(frames, template=template)
-    attempt = _log_attempt(user, result)
+    attempt = _log_attempt(user, result, timing)
     body = _result_body(result, attempt)
     body["attendance"] = None
 

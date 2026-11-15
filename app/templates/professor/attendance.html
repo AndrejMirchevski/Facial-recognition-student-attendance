@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Attendance {{ day.isoformat() }}{% endblock %}
+{% block content %}
+<h1>Attendance</h1>
+
+<section class="card">
+  <div class="day-nav">
+    <a class="btn small" href="{{ url_for('professor.attendance', date=prev_day.isoformat()) }}" aria-label="Previous day">&larr; {{ prev_day.strftime('%d %b') }}</a>
+    <form method="get" action="{{ url_for('professor.attendance') }}" class="day-pick">
+      <label><span class="sr-only">Date</span>
+        <input type="date" name="date" value="{{ day.isoformat() }}" required>
+      </label>
+      <button class="btn small">Show</button>
+    </form>
+    <a class="btn small" href="{{ url_for('professor.attendance', date=next_day.isoformat()) }}" aria-label="Next day">{{ next_day.strftime('%d %b') }} &rarr;</a>
+    {% if day != today %}<a class="small-link" href="{{ url_for('professor.attendance') }}">Today</a>{% endif %}
+  </div>
+  <h2>{{ day.strftime('%A, %d %B %Y') }}{% if day == today %} <span class="count">today</span>{% endif %}</h2>
+  <p class="summary-line"><strong>{{ rows|length }}</strong> checked in{% if absent %} · <strong>{{ absent|length }}</strong> active student{{ 's' if absent|length != 1 }} did not{% endif %}</p>
+
+  {% if rows %}
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Time</th><th>Student ID</th><th>Name</th><th>Check-in attempt</th></tr></thead>
+    <tbody>
+    {% for a, u in rows %}
+      <tr>
+        <td class="mono">{{ a.time.strftime('%H:%M:%S') }}</td>
+        <td class="mono">{{ u.username }}</td>
+        <td>{{ u.full_name }}{% if not u.active %} <span class="pill off">disabled</span>{% endif %}</td>
+        <td><a href="{{ url_for('professor.attempt_detail', attempt_id=a.attempt_id) }}">#{{ a.attempt_id }}</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+    <p class="muted">Nobody checked in on this day.</p>
+  {% endif %}
+
+  {% if absent %}
+  <details class="absent">
+    <summary>Not checked in ({{ absent|length }})</summary>
+    <ul class="plain-list">
+      {% for s in absent %}<li><span class="mono">{{ s.username }}</span> {{ s.full_name }}</li>{% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+  <p><a class="btn small" href="{{ url_for('professor.attendance_csv', date=day.isoformat()) }}">Download this day (CSV)</a></p>
+</section>
+
+<section class="card">
+  <h2>Export a date range</h2>
+  <form method="get" action="{{ url_for('professor.attendance_csv') }}" class="grid-form">
+    <label class="field"><span>From</span><input type="date" name="date_from" value="{{ day.replace(day=1).isoformat() }}" required></label>
+    <label class="field"><span>To (inclusive)</span><input type="date" name="date_to" value="{{ day.isoformat() }}" required></label>
+    <button class="btn primary">Download CSV</button>
+  </form>
+  <p class="muted">One row per check-in: date, time, student ID, name and the attempt number. Times are server time ({{ config.TIMEZONE }}).</p>
+</section>
+{% endblock %}

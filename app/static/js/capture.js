@@ -27,6 +27,7 @@ const BAR_RANGE = 0.30;                                       // head-turn bar: 
 
 let landmarker = null, stream = null, running = false, guide = null, shots = [];
 let lb = { top: 0, bottom: 0, left: 0, right: 0 }, lastLetterbox = -1e9, lastDetect = 0;
+let captureStart = 0;   // performance.now() when the guided capture started (camera ready)
 const small = document.createElement("canvas");                // face region (for the quality check)
 const smallCtx = small.getContext("2d", { willReadFrequently: true });
 const lbCanvas = document.createElement("canvas");             // downscaled frame (letterbox)
@@ -231,6 +232,7 @@ async function begin() {
   guide = new GuidedCapture(G);
   shots = [];
   ui.cancel.hidden = false;
+  captureStart = performance.now();
   running = true;
   requestAnimationFrame(tick);
 }
@@ -256,6 +258,8 @@ async function finishCaptured() {
   const form = new FormData();
   blobs.forEach((b, i) => form.append("frames", b, `frame_${i}.jpg`));
   if (S.mode === "enroll") form.append("consent", consent && consent.checked ? "yes" : "no");
+  // capture duration (camera ready -> 5 frames encoded), for the end-to-end time in the attempts log
+  form.append("capture_ms", String(Math.round(performance.now() - captureStart)));
   let resp, data = {};
   try {
     resp = await fetch(S.uploadUrl, { method: "POST", body: form, credentials: "same-origin",

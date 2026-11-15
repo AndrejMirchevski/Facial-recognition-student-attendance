@@ -144,9 +144,9 @@ Tooling changes:
   are per attack type.
 
 ### OPEN points (deferred calibration + later stages)
-0. **Threshold calibration is STILL OPEN** (all thresholds are initial guesses). After stage 4/5 it
-   can be done from the web app: label attempts (attempts.label / attack_type) and run the
-   threshold report on the attempts table.
+0. **Threshold calibration is STILL OPEN** (all thresholds are initial guesses). Since stage 5 it
+   can be done from the web app: label attempts on the professor's Attempts page, then run
+   `scripts/threshold_report.py` (same analysis as replay_captures.py --suggest + Table I).
 1. Next test round by the user: >= 8 genuine (varied light/distance/glasses), >= 10 printed
    photo, >= 10 screen (PC + phone, photo AND video replay), labelled with 1/2/3.
 2. Then `replay_captures.py --suggest`; decide parallax method (flow looked better on this small
@@ -251,5 +251,84 @@ Tooling changes:
   CSRF, CSP only on capture pages, professor form fixes) + JS port tests. 113 tests pass.
 - No database schema change in stage 4 (existing instance/attendance.db keeps working).
 
-## Stage 5 - professor dashboard, attempts log, labelling, CSV, threshold report - TODO
+## Stage 5 - professor dashboard, attempts log, labelling, CSV, threshold report - DONE (2026-11-15)
+
+- **Professor navigation**: Students | Attendance | Attempts (top bar; own row on phones).
+- **Attendance by date** (`/professor/attendance?date=`, `app/professor/attendance_views.py`): pick a
+  day (date field, previous/next day, today); who checked in and at what time (server time,
+  APP_TIMEZONE) with a link to the check-in attempt, plus the active students who did not.
+  **Attendance CSV**: one day (`?date=`) or a range (`?date_from=&date_to=`, max ~3 years, swapped
+  range accepted, bad dates -> 400): date, time, student_id, full_name, attempt_id.
+- **Attempts log** (`/professor/attempts`, `app/professor/attempts_views.py`; filters and CSV rows in
+  `app/attempt_log.py`): filters date from/to (local days, converted to UTC bounds), student, mode,
+  decision, reason, label (any / not labelled / labelled / each label / each attack type); invalid
+  filter values are ignored with a message. 100 per page, newest first. Columns: similarity,
+  consistency, landmark parallax score + movement, flow parallax score + movement + points, depth
+  relief + nose, texture, server ms, label + note. Current thresholds in the column headers, the
+  deciding parallax method marked *, a failed check in red.
+- **Attempt detail** (`/professor/attempts/<id>`): decision + the message the student saw, whether
+  attendance was written, every score next to the threshold IN FORCE AT THAT TIME
+  (attempts.thresholds), per-frame measurements, timings (pipeline, whole request, browser capture,
+  end-to-end).
+- **Labelling** (POST `/professor/attempts/label`): one value = label + attack type ("genuine",
+  "photo", "photo/printed_flat", "photo/printed_bent", "screen", "screen/phone_photo",
+  "screen/phone_video", "screen/monitor_photo"; the attack type may stay unspecified) - the same
+  types as webcam_test.py. Bulk: checkboxes + select-all (static/js/attempts.js), optional note
+  (empty = keep existing notes), "Remove the label" (asks for confirmation). Detail page: form
+  prefilled with the current label + note, saved as shown. Re-saving the same label keeps
+  labelled_by/at; removing a label clears them. Note max 1000 chars. Redirect back only to the
+  attempts log (no open redirect). CSRF required. Helpers in models.py: label_value /
+  parse_label_value / label_choices / label_text.
+- **Attempts CSV** (`/professor/attempts.csv`, same filters, no paging): all score columns, each
+  check pass/fail, processing / server / browser / end-to-end ms + per-step timings, model, the main
+  thresholds in force, label, attack type, note, labelled by/at. `?anonymise=1`: student ID + name
+  (and labelled_by) replaced by a participant code `P-xxxxxxxx` = HMAC(secret key, user id) - stable
+  across exports, not reversible without the server's secret key.
+- **CSV safety** (`app/csv_export.py`): UTF-8 with BOM (Cyrillic names in Excel); text cells starting
+  with = + - @ get a leading ' (no formula injection); numbers unchanged.
+- **No biometric data**: these views never read face_templates except "exists?" (dashboard). Tested
+  two ways: the template's bytes/values never appear in any professor page or CSV, and an SQL
+  listener shows no professor request ever SELECTs face_templates.template / frame_embeddings.
+- **End-to-end time for Table I** (no schema change; stored in attempts.timings_ms): `server_ms`
+  (request start, before reading the frames -> analysis done) and `client_capture_ms` (browser:
+  camera ready -> 5 frames encoded; capture.js sends `capture_ms`, kept only if 0 < x <= 120000).
+  End-to-end = capture + server; network upload time not included. Attempts made before stage 5
+  have neither -> "n/a" in the report.
+- **Shared analysis** `app/calibration.py` (pure Python): `Record` (from a PipelineResult or an
+  attempts row), outcomes, distributions (+ identity similarity, information only), margins,
+  suggestions, Table I, threshold-change detection. `replay_captures.py` now uses it - its output on
+  the 20 saved captures was verified identical, except the added similarity rows.
+- **`scripts/threshold_report.py`**: reads the attempts table (SQLite opened READ-ONLY); options
+  --from / --to / --mode / --student / --list / --db. Prints outcomes per label + attack type, score
+  distributions, margins + suggested thresholds (always), a NOTE when attempts were made with other
+  thresholds than config.py has now, and **Table I**, each value with n and a 95% Wilson interval,
+  plus the definitions to use in the paper:
+  - identification accuracy = genuine CHECK-INS with identity passed / genuine check-ins where
+    identity was evaluated (quality-stopped attempts have no identity score);
+  - attack rejection rate = attacks NOT accepted (fail or retry) / all attacks of that kind (= 1 - APCER);
+  - false rejection rate = genuine "fail" / genuine pass + fail; genuine retry rate reported separately;
+  - verification time = check-ins that ran the full pipeline (not stopped by a quality gate),
+    server and end-to-end;
+  - participants = distinct students with at least one labelled attempt.
+- Also: 400 error page; template filters `localtime` and `num`; dashboard footnote removed.
+- **Tests**: tests/test_professor_pages.py (48: roles, attendance page + CSV + bad ranges, CSV formula
+  escaping, attempts log scores, every filter incl. the local-day boundary, paging, detail, bulk /
+  single labelling, invalid labels, removing, notes, CSRF, open redirect, attempts CSV + anonymised,
+  no biometric data in output or SQL); tests/test_threshold_report.py (14: margins, suggestions,
+  overlap, Wilson CI, Table I numbers, Record conversion, threshold changes, report text + filters,
+  script end-to-end on a DB file incl. a check that the file is unchanged); browser capture-time
+  tests in test_capture.py. **180 tests pass.**
+- Checked with the real waitress server on a COPY of instance/attendance.db (the real file was not
+  touched): every new page 200, both CSVs, bulk labelling via POST, labelling without CSRF -> 400,
+  threshold_report on the labelled copy; screenshots of the pages (desktop; at 390 px no sideways
+  scrolling).
+- No database schema change in stage 5 (the existing instance/attendance.db keeps working).
+
+### Open after stage 5
+- **"Wrong person" (impostor) attempts have no label of their own.** Labels say WHAT was in front of
+  the camera (genuine / photo / screen), not WHO. A friend checking in on someone else's account is
+  a live face, but must NOT be labelled "genuine" (it would count as a false rejection). For now:
+  leave such attempts unlabelled and add a note. Proposal (ask the user - it changes the agreed
+  label set): a fourth label "impostor" (real, different person) -> the report could also give the
+  impostor acceptance rate and a data-based identity threshold.
 ## Stage 6 - tests, README, SYSTEM_DESCRIPTION, DEPLOYMENT - TODO

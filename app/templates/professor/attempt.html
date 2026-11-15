@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Attempt {{ a.id }}{% endblock %}
+{% macro result(ok) %}{% if ok is sameas true %}<span class="pill ok">pass</span>{% elif ok is sameas false %}<span class="pill off">fail</span>{% else %}<span class="muted">-</span>{% endif %}{% endmacro %}
+{% block content %}
+{% set c = a.checks or {} %}{% set thr = a.thresholds or {} %}{% set t = a.timings_ms or {} %}
+<p><a href="{{ back }}">&larr; Attempts</a></p>
+<h1>Attempt #{{ a.id }} <span class="pill {{ {'pass': 'ok', 'fail': 'off', 'retry': 'warn'}[a.decision] }}">{{ a.decision }}</span></h1>
+
+<section class="card">
+  <dl class="facts">
+    <dt>Student</dt><dd><span class="mono">{{ student.username }}</span> {{ student.full_name }}
+      · <a href="{{ url_for('professor.attempts', student=student.id) }}">all attempts of this student</a></dd>
+    <dt>Time</dt><dd>{{ a.created_at|localtime }} <span class="muted">({{ config.TIMEZONE }}; {{ a.created_at.strftime('%H:%M:%S') }} UTC)</span></dd>
+    <dt>Mode</dt><dd>{{ 'Enrollment' if a.mode == 'enroll' else 'Check-in' }}</dd>
+    <dt>Decision</dt><dd>{{ a.decision }} - {{ a.reason.replace('_', ' ') }}{% if a.failed_checks %}; failed: <strong>{{ a.failed_checks.replace(';', ', ') }}</strong>{% endif %}
+      <br><span class="muted">Student saw: “{{ message }}”</span></dd>
+    {% if a.mode == 'checkin' %}
+    <dt>Attendance</dt><dd>{% if attendance %}written: {{ attendance.date.isoformat() }} {{ attendance.time.strftime('%H:%M:%S') }}
+      {% elif a.duplicate %}not written - verified, but already checked in that day{% else %}not written{% endif %}</dd>
+    {% endif %}
+  </dl>
+</section>
+
+<section class="card">
+  <h2>Label</h2>
+  <form method="post" action="{{ url_for('professor.label_attempts') }}" class="grid-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="ids" value="{{ a.id }}">
+    <input type="hidden" name="single" value="1">
+    <input type="hidden" name="back" value="{{ request.full_path.rstrip('?') }}">
+    {% set current = (a.label ~ ('/' ~ a.attack_type if a.attack_type else '')) if a.label else '' %}
+    <label class="field"><span>What was in front of the camera?</span>
+      <select name="label">
+        <option value="">not labelled</option>
+        {% for v, txt in label_choices %}<option value="{{ v }}"{% if v == current %} selected{% endif %}>{{ txt }}</option>{% endfor %}
+      </select></label>
+    <label class="field"><span>Note (optional)</span>
+      <input type="text" name="note" maxlength="1000" value="{{ a.note or '' }}" autocomplete="off"></label>
+    <button class="btn primary">Save</button>
+  </form>
+  {% if a.label %}<p class="muted">Labelled {{ label_text(a.label, a.attack_type) }}{% if labeller %} by {{ labeller.full_name }}{% endif %}{% if a.labelled_at %} on {{ a.labelled_at|localtime('%Y-%m-%d %H:%M') }}{% endif %}.</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>Scores</h2>
+  <p class="muted">Higher = more likely a real, live face. Thresholds are the ones in force when this attempt was made.</p>
+  <div class="table-wrap">
+  <table class="scores">
+    <thead><tr><th>Check</th><th class="num">Score</th><th class="num">Threshold</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Identity: similarity to the student's template</td><td class="num">{{ a.similarity|num }}</td><td class="num">&ge; {{ thr.get('identity_threshold', '-') }}</td><td>{{ result(c.get('identity')) }}</td></tr>
+      <tr><td>Consistency: lowest similarity between two frames</td><td class="num">{{ a.consistency|num }}</td><td class="num">&ge; {{ thr.get('consistency_threshold', '-') }}</td><td>{{ result(c.get('consistency')) }}</td></tr>
+      <tr class="section"><td colspan="4">Parallax - decided by <strong>{{ a.parallax_method or '-' }}</strong>, status {{ (a.parallax_status or '-').replace('_', ' ') }} {{ result(c.get('parallax')) }}</td></tr>
+      <tr><td>Landmarks: non-planarity (homography error)</td><td class="num">{{ a.parallax_landmark_score|num(4) }}</td><td class="num">&ge; {{ thr.get('parallax_threshold', '-') }}</td><td>{{ result(c.get('parallax_landmarks')) }}</td></tr>
+      <tr><td>Landmarks: head movement</td><td class="num">{{ a.parallax_landmark_movement|num(4) }}</td><td class="num">&ge; {{ thr.get('parallax_min_movement', '-') }}</td><td></td></tr>
+      <tr><td>Optical flow: non-planarity (homography error)</td><td class="num">{{ a.parallax_flow_score|num(4) }}</td><td class="num">&ge; {{ thr.get('parallax_flow_threshold', '-') }}</td><td>{{ result(c.get('parallax_flow')) }}</td></tr>
+      <tr><td>Optical flow: head movement</td><td class="num">{{ a.parallax_flow_movement|num(4) }}</td><td class="num">&ge; {{ thr.get('parallax_flow_min_movement', '-') }}</td><td></td></tr>
+      <tr><td>Optical flow: points tracked (fewest in a frame)</td><td class="num">{{ a.parallax_flow_points if a.parallax_flow_points is not none else '-' }}</td><td class="num">&ge; {{ thr.get('parallax_flow_min_points', '-') }}</td><td></td></tr>
+      <tr class="section"><td colspan="4">Depth (Depth Anything V2) {{ result(c.get('depth')) }}</td></tr>
+      <tr><td>Relief: distance of the face from a flat plane</td><td class="num">{{ a.depth_relief|num(4) }}</td><td class="num">&ge; {{ thr.get('depth_relief_threshold', '-') }}</td><td></td></tr>
+      <tr><td>Nose closer than the cheeks</td><td class="num">{{ a.depth_nose|num(4) }}</td><td class="num">&ge; {{ thr.get('depth_nose_threshold', '-') }}</td><td></td></tr>
+      <tr class="section"><td colspan="4">Texture (MiniFASNet)</td></tr>
+      <tr><td>P(real), mean over frames</td><td class="num">{{ a.texture_score|num(4) }}</td><td class="num">&ge; {{ thr.get('texture_threshold', '-') }}</td><td>{{ result(c.get('texture')) }}</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+{% if a.frames %}
+<section class="card">
+  <h2>Frames</h2>
+  <p class="muted">Measurements per frame (the frames themselves are not stored).</p>
+  <div class="table-wrap">
+  <table class="scores">
+    <thead><tr><th>#</th><th>Problem</th><th class="num">Faces</th><th class="num">Eye dist. px</th><th class="num">Face height</th>
+      <th class="num">Head turn</th><th class="num">Brightness</th><th class="num">Sharpness</th><th class="num">Similarity</th>
+      <th class="num">Texture</th><th class="num">Relief</th><th class="num">Nose</th></tr></thead>
+    <tbody>
+    {% for fr in a.frames %}
+      <tr>
+        <td>{{ fr.index + 1 }}</td>
+        <td>{% if fr.problem %}<span class="bad-text">{{ fr.problem.replace('_', ' ') }}</span>{% else %}<span class="muted">ok</span>{% endif %}</td>
+        <td class="num">{{ fr.faces }}{% if fr.ignored_faces %} <span class="muted" title="duplicate / far-away detections ignored">(+{{ fr.ignored_faces }})</span>{% endif %}</td>
+        <td class="num">{{ fr.interocular_px|num(1) }}</td>
+        <td class="num">{{ fr.face_height_frac|num(2) }}</td>
+        <td class="num">{{ fr.yaw_proxy|num(3) }}</td>
+        <td class="num">{{ fr.brightness|num(1) }}</td>
+        <td class="num">{{ fr.sharpness|num(0) }}</td>
+        <td class="num">{{ fr.similarity|num(3) }}</td>
+        <td class="num">{{ fr.texture|map('num', 3)|join(' / ') if fr.texture else '-' }}</td>
+        <td class="num">{{ fr.depth_relief|num(4) }}</td>
+        <td class="num">{{ fr.depth_nose|num(4) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Timing</h2>
+  <dl class="facts">
+    <dt>Pipeline (server)</dt><dd>{{ a.processing_ms|num(0) }} ms</dd>
+    {% if t.get('server_ms') is not none %}<dt>Whole request (server)</dt><dd>{{ t.server_ms|num(0) }} ms <span class="muted">(reading the upload + pipeline)</span></dd>{% endif %}
+    {% if t.get('client_capture_ms') is not none %}<dt>Guided capture (browser)</dt><dd>{{ t.client_capture_ms|num(0) }} ms</dd>
+      {% if t.get('server_ms') is not none %}<dt>End-to-end</dt><dd>{{ (t.client_capture_ms + t.server_ms)|num(0) }} ms <span class="muted">(capture + server; network upload not included)</span></dd>{% endif %}{% endif %}
+    <dt>Steps</dt><dd>{% for k, v in t.items() if k not in ('server_ms', 'client_capture_ms') %}{{ k.replace('_', ' ') }} {{ v|num(0) }} ms{% if not loop.last %} · {% endif %}{% else %}-{% endfor %}</dd>
+    <dt>Model</dt><dd class="mono">{{ a.model_name or '-' }}</dd>
+  </dl>
+</section>
+{% endblock %}
