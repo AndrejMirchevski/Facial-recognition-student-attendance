@@ -27,6 +27,41 @@ ROLE_STUDENT = "student"
 LABELS = ("genuine", "photo", "screen")
 ATTACK_TYPES = {"photo": ("printed_flat", "printed_bent"),
                 "screen": ("phone_photo", "phone_video", "monitor_photo")}
+LABEL_NAMES = {"genuine": "Genuine (real student)", "photo": "Printed photo", "screen": "Screen replay"}
+ATTACK_TYPE_NAMES = {"printed_flat": "printed, flat", "printed_bent": "printed, bent",
+                     "phone_photo": "phone photo", "phone_video": "phone video", "monitor_photo": "monitor photo"}
+
+
+def label_value(label: str | None, attack_type: str | None) -> str:
+    """Label + attack type as ONE form value: "genuine", "photo", "photo/printed_flat", "" = none."""
+    if not label:
+        return ""
+    return f"{label}/{attack_type}" if attack_type else label
+
+
+def parse_label_value(value: str) -> tuple[str | None, str | None]:
+    """Inverse of label_value(). Raises ValueError for anything that is not a known combination."""
+    if not value:
+        return None, None
+    label, _, attack_type = value.partition("/")
+    if label not in LABELS or (attack_type and attack_type not in ATTACK_TYPES.get(label, ())):
+        raise ValueError(f"unknown label {value!r}")
+    return label, attack_type or None
+
+
+def label_choices() -> list[tuple[str, str]]:
+    """(value, text) for every label a professor can set, attack types grouped under their label."""
+    out = [("genuine", LABEL_NAMES["genuine"])]
+    for label in ("photo", "screen"):
+        out.append((label, f"{LABEL_NAMES[label]} - type not specified"))
+        out += [(f"{label}/{t}", f"{LABEL_NAMES[label]} - {ATTACK_TYPE_NAMES[t]}") for t in ATTACK_TYPES[label]]
+    return out
+
+
+def label_text(label: str | None, attack_type: str | None) -> str:
+    if not label:
+        return ""
+    return LABEL_NAMES[label] + (f" - {ATTACK_TYPE_NAMES.get(attack_type, attack_type)}" if attack_type else "")
 
 
 def utcnow() -> datetime:
@@ -167,7 +202,10 @@ class Attempt(db.Model):
         if attack_type is not None and attack_type not in ATTACK_TYPES.get(label or "", ()):
             raise ValueError(f"attack type {attack_type!r} does not fit label {label!r}")
         self.label, self.attack_type = label, attack_type
-        self.labelled_by_id, self.labelled_at = by.id, utcnow()
+        if label is None:      # label removed
+            self.labelled_by_id, self.labelled_at = None, None
+        else:
+            self.labelled_by_id, self.labelled_at = by.id, utcnow()
 
 
 class Attendance(db.Model):

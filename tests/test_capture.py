@@ -244,9 +244,22 @@ def test_every_attempt_stores_all_scores_and_thresholds(client, db, camera, new_
     a = attempts(db)[-1]
     assert a.parallax_landmark_score == 0.04 and a.parallax_flow_score == 0.03 and a.parallax_flow_points == 120
     assert a.depth_relief == 0.035 and a.depth_nose == 0.1 and a.texture_score == 0.97
-    assert a.timings_ms == {"detect": 50.0} and a.processing_ms == 650.0 and len(a.frames) == 5
+    assert a.timings_ms["detect"] == 50.0 and a.processing_ms == 650.0 and len(a.frames) == 5
+    assert a.timings_ms["server_ms"] >= 0 and "client_capture_ms" not in a.timings_ms   # browser sent none
     assert a.thresholds["identity_threshold"] == vision_service.vision_config().identity_threshold
     assert a.label is None and a.attack_type is None
+
+
+@pytest.mark.parametrize("sent, stored", [("2875.4", 2875.4), ("abc", None), ("-5", None), ("inf", None),
+                                          ("nan", None), ("999999", None)])
+def test_browser_capture_time_is_stored_only_when_plausible(client, db, camera, new_student, sent, stored):
+    """The browser reports how long the guided capture took (end-to-end time for the paper)."""
+    login(client, "s1001", STUDENT_PW)
+    enroll(client, camera)
+    client.post("/api/checkin", data={"frames": frames_payload(), "capture_ms": sent},
+                content_type="multipart/form-data")
+    t = attempts(db)[-1].timings_ms
+    assert t.get("client_capture_ms") == stored and t["server_ms"] >= 0 and t["detect"] == 50.0
 
 
 # ------------------------------------------------------------------------------- deletion

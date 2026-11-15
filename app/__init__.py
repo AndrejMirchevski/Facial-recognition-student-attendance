@@ -125,6 +125,17 @@ def _register_hooks(app: Flask) -> None:
             resp.headers.setdefault("Cache-Control", "no-store")
         return resp
 
+    @app.template_filter("localtime")
+    def _localtime(utc_naive, fmt="%Y-%m-%d %H:%M:%S"):
+        """Stored UTC time -> local time text (APP_TIMEZONE)."""
+        from .security import to_local
+        return to_local(utc_naive).strftime(fmt) if utc_naive else ""
+
+    @app.template_filter("num")
+    def _num(v, digits=3):
+        """Score for display: fixed decimals, "-" when missing."""
+        return "-" if v is None else f"{v:.{digits}f}"
+
     @app.route("/")
     def index():
         if not current_user.is_authenticated:
@@ -139,7 +150,8 @@ def _register_hooks(app: Flask) -> None:
                                message="The form was open too long or was sent from somewhere else. "
                                        "Go back, reload the page and try again."), 400
 
-    for code, title, message in ((403, "Not allowed", "You do not have access to this page."),
+    for code, title, message in ((400, "Bad request", "The request was not valid. Go back and check what you entered."),
+                                 (403, "Not allowed", "You do not have access to this page."),
                                  (404, "Not found", "This page does not exist."),
                                  (413, "Too large", "The upload was too large.")):
         app.register_error_handler(code, _error_handler(code, title, message))

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Attempts{% endblock %}
+{% macro opt(value, text, current) %}<option value="{{ value }}"{% if value == current %} selected{% endif %}>{{ text }}</option>{% endmacro %}
+{% macro score(v, ok, digits=3) %}<td class="num{% if ok is sameas false %} bad{% endif %}">{{ v|num(digits) }}</td>{% endmacro %}
+{% block content %}
+<h1>Attempts <span class="count">{{ total }}</span></h1>
+<p class="muted lead">Every enrollment and check-in attempt with all scores. Label attempts as genuine or as an
+  attack, so <span class="mono">scripts/threshold_report.py</span> can calibrate the thresholds and compute the
+  paper's metrics. No images or face templates are stored here - only scores.</p>
+
+<section class="card">
+  <form method="get" action="{{ url_for('professor.attempts') }}" class="filters">
+    <label class="field"><span>From</span><input type="date" name="date_from" value="{{ f.date_from.isoformat() if f.date_from }}"></label>
+    <label class="field"><span>To</span><input type="date" name="date_to" value="{{ f.date_to.isoformat() if f.date_to }}"></label>
+    <label class="field"><span>Student</span>
+      <select name="student">
+        <option value="">all</option>
+        {% for s in students %}<option value="{{ s.id }}"{% if s.id == f.user_id %} selected{% endif %}>{{ s.username }} - {{ s.full_name }}</option>{% endfor %}
+      </select></label>
+    <label class="field"><span>Mode</span>
+      <select name="mode">{{ opt("", "all", f.mode) }}{% for m in modes %}{{ opt(m, m, f.mode) }}{% endfor %}</select></label>
+    <label class="field"><span>Decision</span>
+      <select name="decision">{{ opt("", "all", f.decision) }}{% for d in decisions %}{{ opt(d, d, f.decision) }}{% endfor %}</select></label>
+    <label class="field"><span>Reason</span>
+      <select name="reason">{{ opt("", "all", f.reason) }}{% for r in reasons %}{{ opt(r, r.replace('_', ' '), f.reason) }}{% endfor %}</select></label>
+    <label class="field"><span>Label</span>
+      <select name="label">{% for v, t in label_filters %}{{ opt(v, t, f.label) }}{% endfor %}</select></label>
+    <div class="filter-actions">
+      <button class="btn primary">Filter</button>
+      {% if f.active %}<a class="btn" href="{{ url_for('professor.attempts') }}">Clear</a>{% endif %}
+    </div>
+  </form>
+  <p class="downloads">
+    <a class="btn small" href="{{ url_for('professor.attempts_csv', **f.query_args()) }}">Download CSV</a>
+    <a class="btn small" href="{{ url_for('professor.attempts_csv', anonymise=1, **f.query_args()) }}">Download CSV (anonymised)</a>
+    <span class="muted">{{ 'The filtered' if f.active else 'All' }} attempts: scores, checks, timings, labels. Anonymised = participant codes instead of student ID and name.</span>
+  </p>
+</section>
+
+{% if not rows %}
+  <section class="card"><p class="muted">No attempts{{ ' match these filters' if f.active }}.</p></section>
+{% else %}
+<form method="post" action="{{ url_for('professor.label_attempts') }}" id="label-form" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="back" value="{{ back }}">
+  <div class="bulk-bar">
+    <label class="field"><span>Label for the selected attempts</span>
+      <select name="label" required>
+        <option value="">Choose a label…</option>
+        {% for v, t in label_choices %}<option value="{{ v }}">{{ t }}</option>{% endfor %}
+        <option value="clear">Remove the label</option>
+      </select></label>
+    <label class="field grow"><span>Note (optional - leave empty to keep existing notes)</span>
+      <input type="text" name="note" maxlength="1000" autocomplete="off" placeholder="e.g. glasses, dim room, A4 matte print"></label>
+    <button class="btn primary" id="apply-label" disabled>Apply to <span id="selected-count">0</span> selected</button>
+  </div>
+
+  <div class="table-wrap">
+  <table class="attempts">
+    <thead>
+      <tr class="groups">
+        <th rowspan="2"><input type="checkbox" id="select-all" aria-label="Select all attempts on this page"></th>
+        <th rowspan="2">#</th><th rowspan="2">Time</th><th rowspan="2">Student</th><th rowspan="2">Mode</th>
+        <th rowspan="2">Decision</th>
+        <th colspan="2">Identity</th><th colspan="2">Parallax landmarks{% if cfg.parallax_method == 'landmarks' %}*{% endif %}</th>
+        <th colspan="3">Parallax flow{% if cfg.parallax_method == 'flow' %}*{% endif %}</th>
+        <th colspan="2">Depth</th><th>Texture</th><th rowspan="2" class="num">Server<br>ms</th><th rowspan="2">Label / note</th>
+      </tr>
+      <tr class="sub">
+        <th class="num" title="Similarity to the student's template (check-in)">sim &ge;{{ cfg.identity_threshold }}</th>
+        <th class="num" title="Lowest similarity between two frames of this attempt">cons &ge;{{ cfg.consistency_threshold }}</th>
+        <th class="num">score &ge;{{ cfg.parallax_threshold }}</th><th class="num">move</th>
+        <th class="num">score &ge;{{ cfg.parallax_flow_threshold }}</th><th class="num">move</th><th class="num">pts</th>
+        <th class="num">relief &ge;{{ cfg.depth_relief_threshold }}</th><th class="num">nose &ge;{{ cfg.depth_nose_threshold }}</th>
+        <th class="num">P(real) &ge;{{ cfg.texture_threshold }}</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for a, u in rows %}
+      {% set c = a.checks or {} %}
+      <tr>
+        <td><input type="checkbox" name="ids" value="{{ a.id }}" aria-label="Select attempt {{ a.id }}"></td>
+        <td><a href="{{ url_for('professor.attempt_detail', attempt_id=a.id, back=back) }}">{{ a.id }}</a></td>
+        <td class="nowrap">{{ a.created_at|localtime('%Y-%m-%d %H:%M') }}</td>
+        <td class="nowrap"><span class="mono">{{ u.username }}</span><br><span class="muted small">{{ u.full_name }}</span></td>
+        <td>{{ a.mode }}</td>
+        <td><span class="pill {{ {'pass': 'ok', 'fail': 'off', 'retry': 'warn'}[a.decision] }}">{{ a.decision }}</span>
+          {% if a.duplicate %}<span class="pill" title="Verified, but the student had already checked in that day">duplicate</span>{% endif %}
+          <br><span class="small">{{ a.reason.replace('_', ' ') }}</span>
+          {% if a.failed_checks %}<br><span class="small bad-text">{{ a.failed_checks.replace(';', ', ') }}</span>{% endif %}</td>
+        {{ score(a.similarity, c.get('identity')) }}{{ score(a.consistency, c.get('consistency')) }}
+        {{ score(a.parallax_landmark_score, c.get('parallax_landmarks'), 4) }}{{ score(a.parallax_landmark_movement, none, 3) }}
+        {{ score(a.parallax_flow_score, c.get('parallax_flow'), 4) }}{{ score(a.parallax_flow_movement, none, 3) }}
+        <td class="num">{{ a.parallax_flow_points if a.parallax_flow_points is not none else '-' }}</td>
+        {{ score(a.depth_relief, c.get('depth')) }}{{ score(a.depth_nose, c.get('depth')) }}
+        {{ score(a.texture_score, c.get('texture')) }}
+        <td class="num">{{ a.processing_ms|num(0) }}</td>
+        <td>{% if a.label %}<span class="pill label-{{ a.label }}">{{ label_text(a.label, a.attack_type) }}</span>{% else %}<span class="muted small">not labelled</span>{% endif %}
+          {% if a.note %}<br><span class="small note">{{ a.note }}</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="muted small">* decides the parallax check (config: parallax_method). Red = that check failed. Thresholds shown are the
+    current ones; each attempt's own thresholds are on its detail page.</p>
+</form>
+
+{% if pages > 1 %}
+<nav class="pager" aria-label="Pages">
+  {% if page > 1 %}<a class="btn small" href="{{ url_for('professor.attempts', page=page - 1, **f.query_args()) }}">&larr; Newer</a>{% endif %}
+  <span>Page {{ page }} of {{ pages }}</span>
+  {% if page < pages %}<a class="btn small" href="{{ url_for('professor.attempts', page=page + 1, **f.query_args()) }}">Older &rarr;</a>{% endif %}
+</nav>
+{% endif %}
+{% endif %}
+<script src="{{ url_for('static', filename='js/attempts.js') }}"></script>
+{% endblock %}
