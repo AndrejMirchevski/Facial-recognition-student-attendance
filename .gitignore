@@ -16,3 +16,6 @@ instance/
 *.png
 !app/static/**/*.png
 !docs/**/*.png
+
+# MediaPipe browser runtime (downloaded by scripts/download_models.py, not committed)
+app/static/vendor/

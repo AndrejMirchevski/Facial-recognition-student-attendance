@@ -1,10 +1,27 @@
 {% extends "base.html" %}
 {% block title %}Face enrollment{% endblock %}
 {% block content %}
-<section class="card narrow">
-  <h1>Face enrollment</h1>
-  <p>Before you can check in, the system needs to register your face once.</p>
-  <p class="notice">Enrollment is not available yet – it is added in the next stage of the project.
-     Until then you cannot check in.</p>
+<h1>Face enrollment</h1>
+<p class="muted">Before you can check in, the system registers your face once. This takes about 10 seconds.</p>
+
+<section class="card consent">
+  <h2>Consent to store your face template</h2>
+  <ul>
+    <li><strong>What is stored:</strong> a <em>face template</em> – a list of 512 numbers computed from your
+      face by a face-recognition model. No photos of you are stored.</li>
+    <li><strong>Purpose:</strong> only to check that it is really you when you check in for attendance.</li>
+    <li><strong>Who can see it:</strong> nobody. Professors cannot see or download it; they only see whether
+      you are enrolled.</li>
+    <li><strong>Liveness check:</strong> the pictures taken now are checked to make sure a real person is in
+      front of the camera (not a photo or a screen), then discarded. Only the scores of each attempt are logged.</li>
+    <li><strong>Deleting it:</strong> you can delete your face data at any time on your page
+      ("Delete my face data"). You then cannot check in until you enroll again.</li>
+  </ul>
+  <label class="check">
+    <input type="checkbox" id="consent" name="consent" value="yes">
+    <span>I have read this and agree that my face template is stored for attendance verification.</span>
+  </label>
 </section>
+
+{% with start_label="Start enrollment" %}{% include "student/_capture.html" %}{% endwith %}
 {% endblock %}

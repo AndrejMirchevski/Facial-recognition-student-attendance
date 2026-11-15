@@ -1,0 +1,37 @@
+{# Guided capture panel, driven by static/js/capture.js. Settings come from the server. #}
+<section class="card capture" id="capture" data-settings="{{ capture_settings }}">
+  <div class="cap-head">
+    <div class="cap-dots" aria-label="pictures taken"></div>
+    <span class="cap-timer muted"></span>
+  </div>
+  <p class="cap-instruction" aria-live="polite">Press the button below to start the camera.</p>
+  <p class="cap-hint" hidden aria-live="polite"></p>
+
+  <div class="cap-stage">
+    <video class="mirror" playsinline muted></video>
+    <canvas class="cap-overlay mirror"></canvas>
+    <div class="cap-bar" hidden>
+      <span class="cap-band" hidden></span>
+      <span class="cap-target" hidden></span>
+      <span class="cap-marker"></span>
+    </div>
+  </div>
+
+  <p class="cap-status" hidden></p>
+  <div class="cap-result" hidden></div>
+  <div class="cap-actions">
+    <button type="button" class="btn primary cap-start">{{ start_label }}</button>
+    <button type="button" class="btn primary cap-retry" hidden>Try again</button>
+    <button type="button" class="btn cap-cancel" hidden>Cancel</button>
+  </div>
+  <details class="cap-help">
+    <summary>Tips</summary>
+    <ul>
+      <li>Sit about an arm's length from the camera, with your whole head visible.</li>
+      <li>Face a light or a window; avoid a bright window behind you.</li>
+      <li>Only small, slow head turns are needed – follow the yellow dot to the green mark.</li>
+      <li>The 5 pictures are only used for this check and are not stored.</li>
+    </ul>
+  </details>
+</section>
+<script type="module" src="{{ url_for('static', filename='js/capture.js') }}"></script>

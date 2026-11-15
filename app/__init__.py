@@ -9,11 +9,12 @@ SECRET_KEY environment variable or instance/secret_key, which is created on firs
 """
 from __future__ import annotations
 
+import mimetypes
 import os
 import secrets
 from pathlib import Path
 
-from flask import Flask, flash, redirect, render_template, request, url_for
+from flask import Flask, flash, g, redirect, render_template, request, url_for
 from flask_login import current_user
 from flask_wtf.csrf import CSRFError
 
@@ -66,6 +67,15 @@ def create_app(config_name: str | None = None, overrides: dict | None = None) ->
     app.register_blueprint(api_bp, url_prefix="/api")
 
     _register_hooks(app)
+
+    # ES modules must be served with a JavaScript MIME type (Windows' registry may not know .mjs)
+    mimetypes.add_type("text/javascript", ".mjs")
+    mimetypes.add_type("application/wasm", ".wasm")
+
+    from . import vision_service
+    vision_service.set_max_parallel(app.config["VISION_MAX_PARALLEL"])
+    if app.config.get("VISION_PRELOAD"):
+        vision_service.get_models()          # load every model once, at startup
     return app
 
 
@@ -110,9 +120,7 @@ def _register_hooks(app: Flask) -> None:
         resp.headers.setdefault("Referrer-Policy", "same-origin")
         # camera only for this site; scripts/styles only from this site (no inline code)
         resp.headers.setdefault("Permissions-Policy", "camera=(self), microphone=(), geolocation=()")
-        resp.headers.setdefault("Content-Security-Policy",
-                                "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; "
-                                "object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
+        resp.headers.setdefault("Content-Security-Policy", content_security_policy(g.get("csp_allow_wasm", False)))
         if current_user.is_authenticated:
             resp.headers.setdefault("Cache-Control", "no-store")
         return resp
@@ -141,6 +149,25 @@ def _register_hooks(app: Flask) -> None:
         """Create all database tables (safe to run repeatedly)."""
         db.create_all()
         print(f"Database ready: {app.config['SQLALCHEMY_DATABASE_URI']}")
+
+
+def content_security_policy(allow_wasm: bool = False) -> str:
+    """Strict policy: everything only from this server, no inline scripts/styles, no eval.
+
+    The enrollment and check-in pages (and only those) additionally get 'wasm-unsafe-eval' in
+    script-src: the browser may then COMPILE WebAssembly (MediaPipe's face landmarker), which CSP
+    otherwise forbids. It does NOT allow JavaScript eval()/new Function() - that would need
+    'unsafe-eval', which is never granted. The .wasm/.js files themselves still have to come from
+    this server ('self').
+
+    connect-src 'self' is stated explicitly: pages may only talk to this server. This also stops
+    the MediaPipe browser library from sending its usage logs to Google (odml.pa.googleapis.com) -
+    it tries to, and the browser refuses.
+    """
+    script_src = "script-src 'self' 'wasm-unsafe-eval'" if allow_wasm else "script-src 'self'"
+    return ("default-src 'self'; " + script_src + "; connect-src 'self'; img-src 'self' data: blob:; "
+            "media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; "
+            "form-action 'self'")
 
 
 def _error_handler(code, title, message):

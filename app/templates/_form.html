@@ -1,7 +1,8 @@
 {% macro field(f, autocomplete=None, autofocus=False) %}
   <label class="field">
     <span>{{ f.label.text }}</span>
-    {{ f(autocomplete=autocomplete, autofocus=autofocus, **({'aria-invalid': 'true'} if f.errors else {})) }}
+    {{ f(autocomplete=autocomplete, autofocus=autofocus, spellcheck="false" if autocomplete == "off" else None,
+         **({'aria-invalid': 'true'} if f.errors else {})) }}
     {% for e in f.errors %}<span class="error">{{ e }}</span>{% endfor %}
   </label>
 {% endmacro %}

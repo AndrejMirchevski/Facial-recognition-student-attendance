@@ -6,11 +6,11 @@
 
 <section class="card">
   <h2>Create a student account</h2>
-  <form method="post" action="{{ url_for('professor.create_student') }}" class="grid-form" novalidate>
+  <form method="post" action="{{ url_for('professor.create_student') }}" class="grid-form" novalidate autocomplete="off">
     {{ form.hidden_tag() }}
     {{ field(form.student_id, autocomplete="off") }}
     {{ field(form.full_name, autocomplete="off") }}
-    {{ field(form.initial_password, autocomplete="new-password") }}
+    {{ field(form.initial_password, autocomplete="off") }}
     {{ form.submit(class="btn primary") }}
   </form>
   <p class="muted">The student must change this password at first login and then enroll their face.</p>

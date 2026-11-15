@@ -1,12 +1,17 @@
 {% extends "base.html" %}
-{% block title %}Home{% endblock %}
+{% block title %}My page{% endblock %}
 {% block content %}
 <h1>Hello, {{ current_user.full_name }}</h1>
 
 <section class="card">
-  <h2>Check in</h2>
-  <p class="muted">Face check-in is added in the next stage of the project.</p>
-  <button class="btn primary" disabled>Check in</button>
+  <h2>Today</h2>
+  {% if today %}
+    <p class="status ok">You checked in today at <strong>{{ today.time.strftime('%H:%M') }}</strong>.</p>
+    <button class="btn primary" disabled>Check in</button>
+  {% else %}
+    <p class="status">You have not checked in today.</p>
+    <a class="btn primary" href="{{ url_for('student.checkin') }}">Check in</a>
+  {% endif %}
 </section>
 
 <section class="card">
@@ -24,4 +29,17 @@
   </table>
   {% endif %}
 </section>
+
+<section class="card danger-zone">
+  <h2>My face data</h2>
+  <p>Enrolled{% if enrolled_at %} on {{ enrolled_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}. Only a face template
+     (a list of numbers, no photos) is stored, and only for checking in.</p>
+  <form method="post" action="{{ url_for('student.delete_face_data') }}" class="confirm"
+        data-confirm="Delete your face data? You will not be able to check in until you enroll again.">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn danger">Delete my face data</button>
+  </form>
+  <p class="muted">This withdraws your consent. Your attendance history is kept.</p>
+</section>
+<script src="{{ url_for('static', filename='js/confirm.js') }}"></script>
 {% endblock %}

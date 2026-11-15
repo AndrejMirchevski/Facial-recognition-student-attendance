@@ -156,7 +156,9 @@ Tooling changes:
    stopped it - watch this case in the next round. Depth: decided (option A, see above).
 4. Face-height limit 0.70: the user sits at 0.65-0.69 with the Iriun phone camera; revisit after
    spoof data (a closer face gives the texture model less context).
-5. Stage 4 decision still open: guided capture in the browser (MediaPipe JS vs server endpoint).
+5. (decided in stage 4: MediaPipe Tasks for JavaScript, served locally.)
+6. Possible later: warn if a new enrollment's face matches another student's template
+   (someone enrolling for a friend) - not in the agreed design, ask first.
 ## Stage 3 - database + auth + professor account management - DONE (2026-11-14)
 
 - **App factory** `app/__init__.py` (`create_app(config_name, overrides)`), blueprints `auth`,
@@ -198,6 +200,56 @@ Tooling changes:
 - Not built yet (later stages): enrollment + check-in + "delete my face data" (stage 4); attendance
   by date, attempts log + labelling, CSV, threshold_report.py (stage 5).
 
-## Stage 4 - enrollment + check-in pages - TODO
+## Stage 4 - enrollment + check-in pages - DONE (2026-11-14)
+
+- **Browser guided capture** with MediaPipe Tasks for JavaScript (`@mediapipe/tasks-vision`
+  1.2.0, Apache-2.0; 5 files from the official npm tarball, SHA-256 pinned, downloaded by
+  `scripts/download_models.py` into `app/static/vendor/` - git-ignored, served by our server, no
+  CDN). The model is our `models/face_landmarker.task`, served at `/student/assets/...` (login).
+  - `static/js/guidance.js`: line-by-line port of guidance.py + assess_frame quality checks
+    (duplicate-face filter, size, too close, brightness, sharpness with an exact port of
+    cv2.warpAffine bilinear alignment, letterbox trim). Thresholds, step names, instructions and
+    hints come from config.py via `vision_service.guidance_settings()` (data attribute).
+  - `static/js/capture.js`: camera (ideal 1920x1080), IMAGE-mode landmarks (~15/s), instruction,
+    hint, dots, timer, head-turn bar; on each step the CURRENT frame is copied at full resolution
+    (max width 1920) as JPEG quality 0.95; one multipart upload of the 5 frames + CSRF header.
+  - Verified: Node tests (tests/js/guidance.test.mjs, run by tests/test_guidance_js.py) replay
+    the Python guidance scenarios; headless Edge on a real frame gives the SAME yaw / IOD /
+    face height / brightness (116.26 vs 116.3) / sharpness (962.6 vs 962.9) as Python; full
+    end-to-end in headless Edge with a fake camera (y4m from a genuine capture) + real models:
+    guidance advanced through all 5 steps, enroll PASS, check-in PASS, attendance written, ~0.74 s.
+- **CSP change (narrow)**: only the enroll and check-in pages get `script-src 'self'
+  'wasm-unsafe-eval'` (allows compiling WebAssembly, NOT JS eval; files still only from 'self').
+  Verified: without it MediaPipe fails with a CSP CompileError. Also `connect-src 'self'` stated
+  explicitly. Found: tasks-vision tries to POST usage logs to odml.pa.googleapis.com - blocked by
+  the CSP (no data to Google). `.mjs` / `.wasm` MIME types registered in create_app.
+- **Server** (`app/attendance.py`, `app/frames.py`, `app/vision_service.py`, `api` blueprint):
+  - `POST /api/enroll` (frames + consent=yes) and `POST /api/checkin` (frames), students only,
+    CSRF required. Uploads validated: exactly 5 files, <= 4 MB each, JPEG/PNG by magic bytes,
+    size read from the header BEFORE decoding (240..2560 px, <= 4.1 MP - decompression-bomb
+    safe), decode check, all frames same size.
+  - Models loaded once at startup (VISION_PRELOAD), max 2 analyses in parallel, max 10 analysed
+    attempts per student per 5 min (429).
+  - Enrollment: consent required (400 before analysis), liveness must pass, template + 5 frame
+    embeddings stored with consent_at (server time) and enroll_attempt_id.
+  - Check-in: 1:1 against the student's own template; attendance only if pass AND none today;
+    savepoint + UNIQUE(user_id, date) handle simultaneous requests; a verified second check-in
+    is logged with attempts.duplicate = True and a clear message.
+  - Every analysed attempt (pass/fail/retry) logged with all scores + thresholds snapshot.
+    Requests refused before analysis (no consent, not enrolled, bad upload, rate limit) are not
+    attempts.
+- **Student pages**: home (today's status, check-in button, history, "Delete my face data" =
+  withdraw consent: deletes the template, keeps attendance + attempt scores, sends the student to
+  enrollment), enrollment page with consent text + checkbox, check-in page (redirects home if
+  already checked in today), clear pass / fail / retry result messages.
+- **Professor form fixes**: all spaces removed from student IDs, "/" allowed, errors shown under
+  the right field with the typed values kept (400), initial password is a plain text field with
+  autocomplete=off (a form without a password field is not autofilled with the professor's login).
+- **Tests**: tests/test_capture.py (26, pipeline mocked by a fake camera: consent, enrollment,
+  liveness required, check-in, duplicate rule incl. DB race, wrong person, 1:1 template, retry,
+  deletion + re-enrollment, upload validation incl. decompression bomb, rate limit, access rules,
+  CSRF, CSP only on capture pages, professor form fixes) + JS port tests. 113 tests pass.
+- No database schema change in stage 4 (existing instance/attendance.db keeps working).
+
 ## Stage 5 - professor dashboard, attempts log, labelling, CSV, threshold report - TODO
 ## Stage 6 - tests, README, SYSTEM_DESCRIPTION, DEPLOYMENT - TODO
